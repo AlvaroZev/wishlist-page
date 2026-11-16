@@ -1,4 +1,4 @@
-# Wishlist — Amigo Secreto
+# Wishlist — Amigo Secreto Navideño
 
 Página web simple para un intercambio de amigo secreto: ver listas de regalos o agregar tus propios pedidos.
 
@@ -12,44 +12,45 @@ Página web simple para un intercambio de amigo secreto: ver listas de regalos o
 
 ## Arquitectura
 
-| Servicio   | Tecnología        | Dónde corre                          |
-|------------|-------------------|--------------------------------------|
-| Frontend   | React + Vite      | Contenedor Docker (nginx)            |
-| Backend    | Node + Express    | Contenedor Docker                    |
-| Base datos | PostgreSQL        | **Externa** (no va en Docker Compose)|
+Un solo contenedor Docker (listo para Railway):
 
-## Configuración
+| Pieza      | Tecnología     | Notas                                      |
+|------------|----------------|--------------------------------------------|
+| Frontend   | React + Vite   | Build estático servido por Express         |
+| Backend    | Node + Express | API `/api` + archivos estáticos            |
+| Base datos | PostgreSQL     | Externa (Railway Postgres u otro proveedor)|
 
-1. Copia el ejemplo de entorno:
-
-```bash
-copy .env.example .env
-```
-
-2. Edita `.env` con tu PostgreSQL externo:
+## Variables de entorno
 
 ```env
 DATABASE_URL=postgresql://usuario:password@host:5432/wishlist
-DATABASE_SSL=false
+DATABASE_SSL=true
 ADMIN_PASSWORD=123456789
-FRONTEND_PORT=8080
-BACKEND_PORT=3001
+PORT=3000
 ```
 
 La API crea sola las tablas al arrancar.
 
-## Arranque con Docker
+## Deploy en Railway
+
+1. Crea un servicio desde este repo (detecta el `Dockerfile` de la raíz).
+2. Conecta PostgreSQL y copia `DATABASE_URL`.
+3. Define:
+   - `DATABASE_URL`
+   - `DATABASE_SSL=true`
+   - `ADMIN_PASSWORD=123456789`
+4. Deploy. Railway asigna `PORT` solo.
+
+## Docker local (un contenedor)
 
 ```bash
-docker compose up --build
+docker build -t wishlist .
+docker run --rm -p 3000:3000 --env-file .env wishlist
 ```
 
-- Frontend: http://localhost:8080  
-- API: http://localhost:3001/api/health  
+Abre http://localhost:3000
 
 ## Desarrollo local (sin Docker)
-
-Necesitas Node 22+ y el `.env` apuntando a PostgreSQL.
 
 ```bash
 cd backend
