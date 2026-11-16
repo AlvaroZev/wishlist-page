@@ -15,6 +15,16 @@ function toLocalItems(items) {
   }));
 }
 
+function sameContent(a, b) {
+  return (
+    a.length === b.length &&
+    a.every(
+      (item, index) =>
+        item.text === b[index].text && (item.url || "") === (b[index].url || "")
+    )
+  );
+}
+
 export default function EditWishlist() {
   const { id } = useParams();
   const [participant, setParticipant] = useState(null);
@@ -26,22 +36,29 @@ export default function EditWishlist() {
   const itemsRef = useRef(items);
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
+  const debounceRef = useRef(null);
+  const participantRef = useRef(null);
 
   useEffect(() => {
     itemsRef.current = items;
   }, [items]);
 
   useEffect(() => {
+    participantRef.current = participant;
+  }, [participant]);
+
+  useEffect(() => {
     let cancelled = false;
+    dirtyRef.current = false;
+
     (async () => {
       setLoading(true);
       setError("");
       try {
         const result = await api.getWishlist(id);
-        if (cancelled) return;
+        if (cancelled || dirtyRef.current) return;
         setParticipant(result.participant);
         setItems(toLocalItems(result.items));
-        dirtyRef.current = false;
         setSaveState("idle");
         setSaveMessage("");
       } catch (err) {
@@ -50,36 +67,35 @@ export default function EditWishlist() {
         if (!cancelled) setLoading(false);
       }
     })();
+
     return () => {
       cancelled = true;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [id]);
 
   async function persist(reason = "auto") {
-    if (!participant || savingRef.current) return;
+    if (!participantRef.current || savingRef.current) return;
     if (reason === "auto" && !dirtyRef.current) return;
 
     savingRef.current = true;
     setSaveState("saving");
     setSaveMessage(reason === "manual" ? "Guardando…" : "Guardando automáticamente…");
 
-    const payload = itemsRef.current.map(({ text, url }) => ({ text, url }));
+    const snapshot = itemsRef.current.map(({ text, url }) => ({
+      text,
+      url,
+    }));
 
     try {
-      const result = await api.saveWishlist(id, payload);
-      const current = itemsRef.current;
-      const unchanged =
-        current.length === payload.length &&
-        current.every(
-          (item, index) =>
-            item.text === payload[index].text && item.url === payload[index].url
-        );
+      await api.saveWishlist(id, snapshot);
 
-      if (unchanged) {
+      // Never replace the form from the server response — that remounts
+      // inputs (new keys) and can wipe text typed during the request.
+      if (sameContent(itemsRef.current, snapshot)) {
         dirtyRef.current = false;
-        setItems(toLocalItems(result.items));
         setSaveState("saved");
-        const time = new Date(result.savedAt).toLocaleTimeString("es", {
+        const time = new Date().toLocaleTimeString("es", {
           hour: "2-digit",
           minute: "2-digit",
         });
@@ -91,6 +107,7 @@ export default function EditWishlist() {
       } else {
         setSaveState("dirty");
         setSaveMessage("Cambios sin guardar…");
+        scheduleAutosave();
       }
     } catch (err) {
       setSaveState("error");
@@ -100,12 +117,19 @@ export default function EditWishlist() {
     }
   }
 
+  function scheduleAutosave() {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      persist("auto");
+    }, 1200);
+  }
+
   useEffect(() => {
     if (loading || !participant) return undefined;
 
     const interval = setInterval(() => {
       persist("auto");
-    }, 8000);
+    }, 10000);
 
     return () => clearInterval(interval);
   }, [loading, participant, id]);
@@ -113,35 +137,53 @@ export default function EditWishlist() {
   useEffect(() => {
     function onVisibility() {
       if (document.visibilityState === "hidden") {
+        if (debounceRef.current) clearTimeout(debounceRef.current);
         persist("auto");
       }
     }
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, [id, participant]);
 
-  function markDirty(nextItems) {
+    function onPageHide() {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      persist("auto");
+    }
+
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", onPageHide);
+    };
+  }, [id]);
+
+  function markDirty(updater) {
     dirtyRef.current = true;
-    setItems(nextItems);
+    setItems((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      itemsRef.current = next;
+      return next;
+    });
     setSaveState("dirty");
     setSaveMessage("Cambios sin guardar…");
+    scheduleAutosave();
   }
 
   function updateItem(localId, field, value) {
-    markDirty(
-      items.map((item) =>
+    markDirty((prev) =>
+      prev.map((item) =>
         item.localId === localId ? { ...item, [field]: value } : item
       )
     );
   }
 
   function addItem() {
-    markDirty([...items, emptyItem()]);
+    markDirty((prev) => [...prev, emptyItem()]);
   }
 
   function removeItem(localId) {
-    const next = items.filter((item) => item.localId !== localId);
-    markDirty(next.length ? next : [emptyItem()]);
+    markDirty((prev) => {
+      const next = prev.filter((item) => item.localId !== localId);
+      return next.length ? next : [emptyItem()];
+    });
   }
 
   if (loading) {
@@ -172,8 +214,8 @@ export default function EditWishlist() {
 
       <h1>Tus pedidos de regalo</h1>
       <p className="lead">
-        Escribe lo que te gustaría recibir. La lista se guarda sola cada pocos
-        segundos. También puedes pulsar el botón grande de guardar.
+        Escribe lo que te gustaría recibir. La lista se guarda sola mientras
+        escribes. También puedes pulsar el botón grande de guardar.
       </p>
 
       <div className={`save-status ${saveState}`} aria-live="polite">
@@ -230,7 +272,10 @@ export default function EditWishlist() {
         <button
           type="button"
           className="btn btn-save"
-          onClick={() => persist("manual")}
+          onClick={() => {
+            if (debounceRef.current) clearTimeout(debounceRef.current);
+            persist("manual");
+          }}
           disabled={saveState === "saving"}
         >
           Guardar ahora
