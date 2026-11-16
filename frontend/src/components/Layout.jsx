@@ -3,7 +3,13 @@ import { Link } from "react-router-dom";
 export default function Layout({ eventTitle, onCustomize, children }) {
   return (
     <div className="app-shell">
-      <div className="bg-layer" aria-hidden="true" />
+      <div className="bg-layer" aria-hidden="true">
+        <img
+          className="bg-photo"
+          src="/christmas-bg.jpg"
+          alt=""
+        />
+      </div>
       <div className="snow" aria-hidden="true">
         <span />
         <span />
